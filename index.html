@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AudioChunk — Advanced Audio Splitter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111;
+    --surface2: #181818;
+    --border: #2a2a2a;
+    --accent: #e8ff4a;
+    --accent2: #ff4a6e;
+    --text: #f0f0f0;
+    --muted: #555;
+    --waveform: #1e1e1e;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Noise overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.5;
+  }
+
+  header {
+    padding: 2rem 3rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 1.5rem;
+    letter-spacing: -0.03em;
+  }
+
+  .logo span { color: var(--accent); }
+
+  .tag {
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.7rem;
+    border-radius: 2px;
+  }
+
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 3rem 2rem;
+  }
+
+  /* Drop Zone */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 4px;
+    padding: 4rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    background: var(--surface);
+    margin-bottom: 2rem;
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: #111a00;
+  }
+
+  .drop-zone h2 {
+    font-family: 'Syne', sans-serif;
+    font-size: 2rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+  }
+
+  .drop-zone h2 span { color: var(--accent); }
+
+  .drop-zone p {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+  }
+
+  .drop-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    display: block;
+  }
+
+  #file-input { display: none; }
+
+  .btn {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s ease;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+  }
+
+  .btn-primary:hover { background: #d4eb00; transform: translateY(-1px); }
+  .btn-primary:disabled { background: var(--muted); color: #333; cursor: not-allowed; transform: none; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+  }
+
+  .btn-danger:hover { background: var(--accent2); color: #fff; }
+
+  /* File Info */
+  .file-info {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    gap: 1.5rem;
+    align-items: center;
+  }
+
+  .file-info.visible { display: flex; }
+
+  .file-meta { flex: 1; }
+  .file-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 400px;
+  }
+
+  .file-details {
+    display: flex;
+    gap: 2rem;
+    margin-top: 0.5rem;
+  }
+
+  .detail { font-size: 0.7rem; color: var(--muted); }
+  .detail span { color: var(--text); font-weight: 700; }
+
+  /* Waveform */
+  #waveform-container {
+    background: var(--waveform);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 2rem;
+    overflow: hidden;
+    display: none;
+    position: relative;
+  }
+
+  #waveform-container.visible { display: block; }
+
+  #waveform {
+    width: 100%;
+    height: 140px;
+    display: block;
+    cursor: crosshair;
+  }
+
+  .playhead {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    background: var(--accent);
+    pointer-events: none;
+    display: none;
+  }
+
+  .time-ruler {
+    height: 24px;
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  #time-ruler-canvas {
+    width: 100%;
+    height: 24px;
+    display: block;
+  }
+
+  /* Controls Panel */
+  .controls-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .control-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.25rem;
+  }
+
+  .control-card label {
+    display: block;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+
+  .control-card .value-display {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  input[type="number"], select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 2px;
+    outline: none;
+    margin-top: 0.25rem;
+  }
+
+  input[type="number"]:focus, select:focus {
+    border-color: var(--accent);
+  }
+
+  select option { background: var(--surface2); }
+
+  /* Mode Tabs */
+  .mode-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .mode-tab {
+    flex: 1;
+    padding: 0.75rem;
+    text-align: center;
+    cursor: pointer;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    transition: all 0.15s;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+  }
+
+  .mode-tab:last-child { border-right: none; }
+  .mode-tab.active { background: var(--accent); color: #000; font-weight: 700; }
+  .mode-tab:hover:not(.active) { color: var(--text); background: var(--surface2); }
+
+  /* Action Bar */
+  .action-bar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding: 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  .action-bar .spacer { flex: 1; }
+
+  /* Progress */
+  .progress-bar-wrap {
+    flex: 1;
+    background: var(--border);
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    display: none;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.1s linear;
+    border-radius: 3px;
+  }
+
+  /* Chunks List */
+  .chunks-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+
+  .chunks-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 1.1rem;
+  }
+
+  .chunk-count {
+    background: var(--accent);
+    color: #000;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.25rem 0.6rem;
+    border-radius: 20px;
+    margin-left: 0.75rem;
+  }
+
+  .chunks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .chunk-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    transition: border-color 0.15s;
+    animation: slideIn 0.3s ease forwards;
+    opacity: 0;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .chunk-item:hover { border-color: var(--accent); }
+
+  .chunk-num {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: var(--accent);
+    min-width: 2.5rem;
+  }
+
+  .chunk-viz {
+    flex: 1;
+    height: 36px;
+  }
+
+  .chunk-info { min-width: 120px; }
+  .chunk-time { font-size: 0.7rem; color: var(--muted); }
+  .chunk-size { font-size: 0.75rem; font-weight: 700; margin-top: 2px; }
+
+  .chunk-actions { display: flex; gap: 0.5rem; }
+
+  .btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.65rem;
+  }
+
+  /* Status */
+  .status {
+    font-size: 0.7rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .status-dot.active {
+    background: var(--accent);
+    animation: pulse 1s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Silence detection indicator */
+  .silence-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .silence-badge {
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 2px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .silence-badge.detected {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.25s ease;
+    z-index: 999;
+    max-width: 300px;
+  }
+
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.error { border-left-color: var(--accent2); }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+  }
+
+  .empty-state p { margin-top: 0.5rem; }
+
+  /* Loading spinner */
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+  .format-row {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .format-option {
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .overlap-note {
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Audio<span>Chunk</span></div>
+  <span class="tag">Advanced Splitter v2</span>
+</header>
+
+<main>
+  <!-- Drop Zone -->
+  <div class="drop-zone" id="drop-zone">
+    <span class="drop-icon">◈</span>
+    <h2>Drop <span>Audio File</span> Here</h2>
+    <p>MP3, WAV, OGG, FLAC, M4A, AAC — or click to browse</p>
+    <br>
+    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">Select File</button>
+    <input type="file" id="file-input" accept="audio/*">
+  </div>
+
+  <!-- File Info -->
+  <div class="file-info" id="file-info">
+    <div class="file-meta">
+      <div class="file-name" id="file-name">—</div>
+      <div class="file-details">
+        <div class="detail">Duration <span id="file-duration">—</span></div>
+        <div class="detail">Size <span id="file-size">—</span></div>
+        <div class="detail">Type <span id="file-type">—</span></div>
+        <div class="detail">Sample Rate <span id="file-sr">—</span></div>
+      </div>
+      <div class="silence-badges" id="silence-badges"></div>
+    </div>
+    <button class="btn btn-ghost" onclick="resetAll()">✕ Remove</button>
+  </div>
+
+  <!-- Waveform -->
+  <div id="waveform-container">
+    <canvas id="waveform"></canvas>
+    <div class="playhead" id="playhead"></div>
+    <div class="time-ruler">
+      <canvas id="time-ruler-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Mode Tabs -->
+  <div class="mode-tabs" id="mode-tabs">
+    <div class="mode-tab active" data-mode="duration" onclick="setMode('duration')">⏱ Fixed Duration</div>
+    <div class="mode-tab" data-mode="count" onclick="setMode('count')">🔢 Fixed Count</div>
+    <div class="mode-tab" data-mode="size" onclick="setMode('size')">💾 Max File Size</div>
+    <div class="mode-tab" data-mode="silence" onclick="setMode('silence')">🔇 Silence Split</div>
+    <div class="mode-tab" data-mode="custom" onclick="setMode('custom')">✂️ Custom Points</div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls-grid" id="controls-grid">
+    <!-- Populated by JS -->
+  </div>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Load an audio file to begin</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="progress-bar-wrap" id="progress-wrap">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+    <button class="btn btn-primary" id="process-btn" onclick="processAudio()" disabled>
+      ⚡ Process Chunks
+    </button>
+    <button class="btn btn-ghost" id="download-all-btn" onclick="downloadAll()" disabled style="display:none">
+      ↓ Download All
+    </button>
+  </div>
+
+  <!-- Chunks -->
+  <div id="chunks-section" style="display:none">
+    <div class="chunks-header">
+      <div>
+        <span class="chunks-title">Chunks</span>
+        <span class="chunk-count" id="chunk-count">0</span>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="clearChunks()">Clear All</button>
+    </div>
+    <div class="chunks-list" id="chunks-list"></div>
+  </div>
+
+  <div class="empty-state" id="empty-state">
+    <div style="font-size:2rem">◈</div>
+    <p>No chunks yet — configure settings and hit Process</p>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+let audioBuffer = null;
+let audioCtx = null;
+let originalFile = null;
+let chunks = [];
+let currentMode = 'duration';
+let customSplitPoints = []; // seconds
+let currentSource = null;
+
+// ============================================================
+// Audio Context
+// ============================================================
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// ============================================================
+// File Handling
+// ============================================================
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) loadFile(file);
+});
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) loadFile(e.target.files[0]);
+});
+
+dropZone.addEventListener('click', e => {
+  if (e.target.tagName !== 'BUTTON') fileInput.click();
+});
+
+async function loadFile(file) {
+  if (!file.type.startsWith('audio/')) {
+    showToast('Please select an audio file.', true);
+    return;
+  }
+  originalFile = file;
+  setStatus('Loading...', true);
+
+  const arrayBuffer = await file.arrayBuffer();
+  const ctx = getAudioCtx();
+  
+  try {
+    audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+  } catch (e) {
+    showToast('Could not decode audio. Try a different file.', true);
+    setStatus('Error decoding file', false);
+    return;
+  }
+
+  // Show file info
+  const dur = audioBuffer.duration;
+  document.getElementById('file-name').textContent = file.name;
+  document.getElementById('file-duration').textContent = formatTime(dur);
+  document.getElementById('file-size').textContent = formatBytes(file.size);
+  document.getElementById('file-type').textContent = file.type.split('/')[1].toUpperCase();
+  document.getElementById('file-sr').textContent = audioBuffer.sampleRate + ' Hz';
+
+  document.getElementById('file-info').classList.add('visible');
+  dropZone.style.display = 'none';
+
+  // Draw waveform
+  drawWaveform();
+  drawRuler();
+  document.getElementById('waveform-container').classList.add('visible');
+
+  // Detect silence
+  detectSilenceRegions();
+
+  // Enable processing
+  document.getElementById('process-btn').disabled = false;
+  renderControls();
+  updateStatus();
+  showChunksSection(false);
+}
+
+// ============================================================
+// Waveform Drawing
+// ============================================================
+function drawWaveform(splitPoints = []) {
+  const canvas = document.getElementById('waveform');
+  const container = document.getElementById('waveform-container');
+  canvas.width = container.clientWidth || 1000;
+  canvas.height = 140;
+  const ctx = canvas.getContext('2d');
+  const data = audioBuffer.getChannelData(0);
+  const width = canvas.width;
+  const height = canvas.height;
+  const step = Math.ceil(data.length / width);
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, width, height);
+
+  // Draw waveform
+  ctx.beginPath();
+  ctx.strokeStyle = '#3a5a00';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < width; i++) {
+    let min = 1, max = -1;
+    for (let j = 0; j < step; j++) {
+      const val = data[i * step + j] || 0;
+      if (val < min) min = val;
+      if (val > max) max = val;
+    }
+    const y1 = ((1 + min) / 2) * height;
+    const y2 = ((1 + max) / 2) * height;
+    ctx.moveTo(i, y1);
+    ctx.lineTo(i, y2);
+  }
+  ctx.stroke();
+
+  // Draw filled waveform (brighter)
+  for (let i = 0; i < width; i++) {
+    let min = 1, max = -1;
+    for (let j = 0; j < step; j++) {
+      const val = data[i * step + j] || 0;
+      if (val < min) min = val;
+      if (val > max) max = val;
+    }
+    const y1 = ((1 + min) / 2) * height;
+    const y2 = ((1 + max) / 2) * height;
+    const amp = max - min;
+    const g = ctx.createLinearGradient(0, y2, 0, y1);
+    g.addColorStop(0, `rgba(180, 230, 0, ${0.4 + amp * 0.5})`);
+    g.addColorStop(1, `rgba(232, 255, 74, ${0.1 + amp * 0.3})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(i, y2, 1, Math.max(y1 - y2, 1));
+  }
+
+  // Midline
+  ctx.strokeStyle = '#2a2a2a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, height / 2);
+  ctx.lineTo(width, height / 2);
+  ctx.stroke();
+
+  // Draw split lines
+  splitPoints.forEach((pt, idx) => {
+    const x = (pt / audioBuffer.duration) * width;
+    ctx.strokeStyle = '#ff4a6e';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    ctx.fillStyle = '#ff4a6e';
+    ctx.font = 'bold 10px Space Mono';
+    ctx.fillText(formatTime(pt), x + 4, 14);
+  });
+}
+
+function drawRuler() {
+  const canvas = document.getElementById('time-ruler-canvas');
+  const container = document.getElementById('waveform-container');
+  canvas.width = container.clientWidth || 1000;
+  canvas.height = 24;
+  const ctx = canvas.getContext('2d');
+  const dur = audioBuffer.duration;
+  const w = canvas.width;
+
+  ctx.fillStyle = '#181818';
+  ctx.fillRect(0, 0, w, 24);
+
+  ctx.fillStyle = '#444';
+  ctx.font = '9px Space Mono';
+
+  const interval = getNiceInterval(dur);
+  for (let t = 0; t <= dur; t += interval) {
+    const x = (t / dur) * w;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x, 0, 1, 6);
+    ctx.fillStyle = '#555';
+    ctx.fillText(formatTime(t), x + 2, 18);
+  }
+}
+
+function getNiceInterval(dur) {
+  if (dur < 10) return 1;
+  if (dur < 60) return 5;
+  if (dur < 300) return 30;
+  if (dur < 600) return 60;
+  return 120;
+}
+
+// Click on waveform for custom mode
+document.getElementById('waveform').addEventListener('click', function(e) {
+  if (currentMode !== 'custom') return;
+  const rect = this.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const t = (x / this.width) * audioBuffer.duration;
+  customSplitPoints.push(t);
+  customSplitPoints.sort((a, b) => a - b);
+  drawWaveform(customSplitPoints);
+  updateCustomPointsList();
+  updateStatus();
+});
+
+// ============================================================
+// Silence Detection
+// ============================================================
+let silenceRegions = [];
+
+function detectSilenceRegions() {
+  const data = audioBuffer.getChannelData(0);
+  const sr = audioBuffer.sampleRate;
+  const threshold = 0.01;
+  const minDur = 0.3; // min 300ms silence
+  const regions = [];
+  let inSilence = false;
+  let silStart = 0;
+  const step = Math.floor(sr * 0.01); // 10ms step
+
+  for (let i = 0; i < data.length; i += step) {
+    let rms = 0;
+    const len = Math.min(step, data.length - i);
+    for (let j = i; j < i + len; j++) rms += data[j] * data[j];
+    rms = Math.sqrt(rms / len);
+
+    if (rms < threshold) {
+      if (!inSilence) { inSilence = true; silStart = i / sr; }
+    } else {
+      if (inSilence) {
+        const dur = (i / sr) - silStart;
+        if (dur >= minDur) regions.push({ start: silStart, end: i / sr });
+        inSilence = false;
+      }
+    }
+  }
+
+  silenceRegions = regions;
+
+  // Show badges
+  const badges = document.getElementById('silence-badges');
+  badges.innerHTML = '';
+  const b1 = document.createElement('span');
+  b1.className = 'silence-badge' + (regions.length > 0 ? ' detected' : '');
+  b1.textContent = `${regions.length} silence region${regions.length !== 1 ? 's' : ''} detected`;
+  badges.appendChild(b1);
+
+  if (regions.length > 0) {
+    const b2 = document.createElement('span');
+    b2.className = 'silence-badge detected';
+    b2.textContent = 'Silence split available';
+    badges.appendChild(b2);
+  }
+}
+
+// ============================================================
+// Mode Controls
+// ============================================================
+const modeControls = {
+  duration: `
+    <div class="control-card">
+      <label>Chunk Duration</label>
+      <div class="value-display" id="dur-display">30s</div>
+      <input type="range" id="chunk-dur" min="1" max="600" value="30" oninput="updateDurDisplay()">
+    </div>
+    <div class="control-card">
+      <label>Overlap Between Chunks</label>
+      <div class="value-display" id="overlap-display">0s</div>
+      <input type="range" id="chunk-overlap" min="0" max="30" value="0" oninput="updateOverlapDisplay()">
+      <p class="overlap-note">Adds shared audio at start/end of each chunk</p>
+    </div>
+    <div class="control-card">
+      <label>Output Format</label>
+      <select id="out-format">
+        <option value="wav">WAV (lossless)</option>
+        <option value="original">Original format</option>
+      </select>
+      <label style="margin-top:1rem">Fade In/Out (ms)</label>
+      <input type="number" id="fade-ms" value="0" min="0" max="2000" placeholder="0">
+    </div>
+  `,
+  count: `
+    <div class="control-card">
+      <label>Number of Chunks</label>
+      <div class="value-display" id="count-display">4</div>
+      <input type="range" id="chunk-count-range" min="2" max="100" value="4" oninput="updateCountDisplay()">
+    </div>
+    <div class="control-card">
+      <label>Overlap Between Chunks</label>
+      <div class="value-display" id="overlap-display2">0s</div>
+      <input type="range" id="chunk-overlap2" min="0" max="30" value="0" oninput="updateOverlapDisplay2()">
+    </div>
+    <div class="control-card">
+      <label>Output Format</label>
+      <select id="out-format2">
+        <option value="wav">WAV (lossless)</option>
+        <option value="original">Original format</option>
+      </select>
+      <label style="margin-top:1rem">Fade In/Out (ms)</label>
+      <input type="number" id="fade-ms2" value="0" min="0" max="2000" placeholder="0">
+    </div>
+  `,
+  size: `
+    <div class="control-card">
+      <label>Max Chunk Size (MB)</label>
+      <div class="value-display" id="size-display">10 MB</div>
+      <input type="range" id="chunk-size-range" min="1" max="100" value="10" oninput="updateSizeDisplay()">
+    </div>
+    <div class="control-card">
+      <label>Bitrate Estimate (kbps)</label>
+      <input type="number" id="bitrate" value="128" min="32" max="320">
+      <p class="overlap-note">Used to estimate file size per second of audio</p>
+    </div>
+    <div class="control-card">
+      <label>Output Format</label>
+      <select id="out-format3">
+        <option value="wav">WAV (lossless)</option>
+        <option value="original">Original format</option>
+      </select>
+    </div>
+  `,
+  silence: `
+    <div class="control-card">
+      <label>Silence Threshold (dB)</label>
+      <div class="value-display" id="sil-thresh-display">-40 dB</div>
+      <input type="range" id="sil-threshold" min="-60" max="-10" value="-40" oninput="updateSilThreshDisplay()">
+    </div>
+    <div class="control-card">
+      <label>Min Silence Duration (ms)</label>
+      <div class="value-display" id="sil-dur-display">300ms</div>
+      <input type="range" id="sil-min-dur" min="100" max="3000" value="300" step="50" oninput="updateSilDurDisplay()">
+    </div>
+    <div class="control-card">
+      <label>Keep Silence Padding (ms)</label>
+      <input type="number" id="sil-padding" value="100" min="0" max="1000">
+      <p class="overlap-note">Padding kept around each split point</p>
+      <label style="margin-top:1rem">Output Format</label>
+      <select id="out-format4">
+        <option value="wav">WAV (lossless)</option>
+      </select>
+    </div>
+  `,
+  custom: `
+    <div class="control-card" style="grid-column: span 2">
+      <label>Split Points — Click Waveform to Add</label>
+      <div id="custom-points-list" style="margin-top:0.5rem; min-height:40px; color:#555; font-size:0.75rem">
+        No points set. Click on the waveform above to add split points.
+      </div>
+      <div style="margin-top:0.75rem; display:flex; gap:0.5rem">
+        <button class="btn btn-ghost btn-sm" onclick="clearCustomPoints()">Clear Points</button>
+        <button class="btn btn-ghost btn-sm" onclick="addEvenSplits()">Add Even Splits</button>
+      </div>
+    </div>
+    <div class="control-card">
+      <label>Output Format</label>
+      <select id="out-format5">
+        <option value="wav">WAV (lossless)</option>
+      </select>
+      <label style="margin-top:1rem">Fade In/Out (ms)</label>
+      <input type="number" id="fade-ms5" value="0" min="0" max="2000" placeholder="0">
+    </div>
+  `,
+};
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+  renderControls();
+  if (mode === 'custom') {
+    drawWaveform(customSplitPoints);
+  } else {
+    if (audioBuffer) drawWaveform();
+  }
+  updateStatus();
+}
+
+function renderControls() {
+  document.getElementById('controls-grid').innerHTML = modeControls[currentMode] || '';
+}
+
+// Display updaters
+function updateDurDisplay() {
+  const v = document.getElementById('chunk-dur').value;
+  document.getElementById('dur-display').textContent = v >= 60 ? `${(v/60).toFixed(1)}m` : `${v}s`;
+}
+function updateOverlapDisplay() {
+  const v = document.getElementById('chunk-overlap').value;
+  document.getElementById('overlap-display').textContent = `${v}s`;
+}
+function updateCountDisplay() {
+  document.getElementById('count-display').textContent = document.getElementById('chunk-count-range').value;
+}
+function updateOverlapDisplay2() {
+  const v = document.getElementById('chunk-overlap2').value;
+  document.getElementById('overlap-display2').textContent = `${v}s`;
+}
+function updateSizeDisplay() {
+  document.getElementById('size-display').textContent = document.getElementById('chunk-size-range').value + ' MB';
+}
+function updateSilThreshDisplay() {
+  document.getElementById('sil-thresh-display').textContent = document.getElementById('sil-threshold').value + ' dB';
+}
+function updateSilDurDisplay() {
+  document.getElementById('sil-dur-display').textContent = document.getElementById('sil-min-dur').value + 'ms';
+}
+
+function updateCustomPointsList() {
+  const el = document.getElementById('custom-points-list');
+  if (!el) return;
+  if (customSplitPoints.length === 0) {
+    el.innerHTML = '<span style="color:#555">No points set. Click on the waveform above to add split points.</span>';
+    return;
+  }
+  el.innerHTML = customSplitPoints.map((p, i) =>
+    `<span style="display:inline-block; margin:2px 4px; padding:3px 8px; border:1px solid #333; border-radius:2px; cursor:pointer" 
+     onclick="removeCustomPoint(${i})" title="Click to remove">
+       ✕ ${formatTime(p)}
+     </span>`
+  ).join('');
+}
+
+function removeCustomPoint(idx) {
+  customSplitPoints.splice(idx, 1);
+  drawWaveform(customSplitPoints);
+  updateCustomPointsList();
+  updateStatus();
+}
+
+function clearCustomPoints() {
+  customSplitPoints = [];
+  drawWaveform([]);
+  updateCustomPointsList();
+  updateStatus();
+}
+
+function addEvenSplits() {
+  const n = parseInt(prompt('How many equal parts?', '4')) || 4;
+  if (!audioBuffer) return;
+  customSplitPoints = [];
+  for (let i = 1; i < n; i++) {
+    customSplitPoints.push((audioBuffer.duration / n) * i);
+  }
+  drawWaveform(customSplitPoints);
+  updateCustomPointsList();
+  updateStatus();
+}
+
+// ============================================================
+// Compute Split Points
+// ============================================================
+function computeSplitPoints() {
+  const dur = audioBuffer.duration;
+  let points = [0];
+
+  if (currentMode === 'duration') {
+    const chunkDur = parseFloat(document.getElementById('chunk-dur')?.value || 30);
+    for (let t = chunkDur; t < dur; t += chunkDur) points.push(t);
+
+  } else if (currentMode === 'count') {
+    const n = parseInt(document.getElementById('chunk-count-range')?.value || 4);
+    for (let i = 1; i < n; i++) points.push((dur / n) * i);
+
+  } else if (currentMode === 'size') {
+    const maxMB = parseFloat(document.getElementById('chunk-size-range')?.value || 10);
+    const bitrate = parseFloat(document.getElementById('bitrate')?.value || 128);
+    const bytesPerSec = (bitrate * 1000) / 8;
+    const maxBytes = maxMB * 1024 * 1024;
+    const chunkDur = maxBytes / bytesPerSec;
+    for (let t = chunkDur; t < dur; t += chunkDur) points.push(t);
+
+  } else if (currentMode === 'silence') {
+    const threshDb = parseFloat(document.getElementById('sil-threshold')?.value || -40);
+    const minDurMs = parseFloat(document.getElementById('sil-min-dur')?.value || 300);
+    const padMs = parseFloat(document.getElementById('sil-padding')?.value || 100);
+    const threshold = Math.pow(10, threshDb / 20);
+    const minDurSec = minDurMs / 1000;
+    const padSec = padMs / 1000;
+    const data = audioBuffer.getChannelData(0);
+    const sr = audioBuffer.sampleRate;
+    const stepSize = Math.floor(sr * 0.01);
+    let inSilence = false;
+    let silStart = 0;
+    for (let i = 0; i < data.length; i += stepSize) {
+      let rms = 0;
+      const len = Math.min(stepSize, data.length - i);
+      for (let j = i; j < i + len; j++) rms += data[j] * data[j];
+      rms = Math.sqrt(rms / len);
+      const t = i / sr;
+      if (rms < threshold) {
+        if (!inSilence) { inSilence = true; silStart = t; }
+      } else {
+        if (inSilence) {
+          const d = t - silStart;
+          if (d >= minDurSec) {
+            const mid = silStart + d / 2;
+            points.push(mid);
+          }
+          inSilence = false;
+        }
+      }
+    }
+
+  } else if (currentMode === 'custom') {
+    points = [0, ...customSplitPoints];
+  }
+
+  points.push(dur);
+  return points.sort((a, b) => a - b);
+}
+
+// ============================================================
+// Process Audio
+// ============================================================
+async function processAudio() {
+  if (!audioBuffer) return;
+  chunks = [];
+  clearChunks();
+
+  const splitPoints = computeSplitPoints();
+  if (splitPoints.length < 2) { showToast('No valid split points!', true); return; }
+
+  // Draw splits on waveform
+  const pts = splitPoints.slice(1, -1);
+  drawWaveform(pts);
+
+  const btn = document.getElementById('process-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Processing...';
+
+  const progressWrap = document.getElementById('progress-wrap');
+  const progressBar = document.getElementById('progress-bar');
+  progressWrap.style.display = 'block';
+
+  const totalChunks = splitPoints.length - 1;
+  let fadeSamples = 0;
+
+  // Fade samples
+  const fadeMs = parseFloat(
+    document.getElementById('fade-ms')?.value ||
+    document.getElementById('fade-ms2')?.value ||
+    document.getElementById('fade-ms5')?.value || 0
+  );
+  fadeSamples = Math.floor((fadeMs / 1000) * audioBuffer.sampleRate);
+
+  let overlap = 0;
+  if (currentMode === 'duration') overlap = parseFloat(document.getElementById('chunk-overlap')?.value || 0);
+  if (currentMode === 'count') overlap = parseFloat(document.getElementById('chunk-overlap2')?.value || 0);
+
+  setStatus('Processing chunks...', true);
+  document.getElementById('chunks-section').style.display = 'block';
+  document.getElementById('empty-state').style.display = 'none';
+
+  for (let i = 0; i < totalChunks; i++) {
+    await new Promise(r => setTimeout(r, 0)); // yield to UI
+
+    let startTime = splitPoints[i] - (i > 0 ? overlap : 0);
+    let endTime = splitPoints[i + 1] + (i < totalChunks - 1 ? overlap : 0);
+    startTime = Math.max(0, startTime);
+    endTime = Math.min(audioBuffer.duration, endTime);
+
+    const startSample = Math.floor(startTime * audioBuffer.sampleRate);
+    const endSample = Math.floor(endTime * audioBuffer.sampleRate);
+    const length = endSample - startSample;
+
+    const chunkCtx = new OfflineAudioContext(
+      audioBuffer.numberOfChannels,
+      length,
+      audioBuffer.sampleRate
+    );
+
+    const chunkBuffer = chunkCtx.createBuffer(
+      audioBuffer.numberOfChannels,
+      length,
+      audioBuffer.sampleRate
+    );
+
+    for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+      const src = audioBuffer.getChannelData(ch).slice(startSample, endSample);
+      // Apply fade
+      if (fadeSamples > 0) {
+        const fade = Math.min(fadeSamples, src.length / 2);
+        for (let s = 0; s < fade; s++) {
+          src[s] *= s / fade;
+          src[src.length - 1 - s] *= s / fade;
+        }
+      }
+      chunkBuffer.copyToChannel(src, ch);
+    }
+
+    const source = chunkCtx.createBufferSource();
+    source.buffer = chunkBuffer;
+    source.connect(chunkCtx.destination);
+    source.start(0);
+    await chunkCtx.startRendering();
+
+    const wavBlob = bufferToWavBlob(chunkBuffer);
+    const url = URL.createObjectURL(wavBlob);
+
+    chunks.push({
+      index: i + 1,
+      start: startTime,
+      end: endTime,
+      duration: endTime - startTime,
+      buffer: chunkBuffer,
+      url,
+      size: wavBlob.size,
+      blob: wavBlob,
+    });
+
+    addChunkItem(chunks[chunks.length - 1]);
+
+    progressBar.style.width = `${((i + 1) / totalChunks) * 100}%`;
+    document.getElementById('chunk-count').textContent = i + 1;
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '⚡ Process Chunks';
+  progressWrap.style.display = 'none';
+
+  document.getElementById('download-all-btn').style.display = '';
+  document.getElementById('download-all-btn').disabled = false;
+
+  setStatus(`${totalChunks} chunks ready`, false);
+  showToast(`✓ ${totalChunks} chunks created successfully`);
+}
+
+// ============================================================
+// WAV Encoder
+// ============================================================
+function bufferToWavBlob(buffer) {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const length = buffer.length;
+  const interleaved = new Float32Array(length * numChannels);
+
+  for (let ch = 0; ch < numChannels; ch++) {
+    const channelData = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      interleaved[i * numChannels + ch] = channelData[i];
+    }
+  }
+
+  const pcm = new Int16Array(interleaved.length);
+  for (let i = 0; i < interleaved.length; i++) {
+    pcm[i] = Math.max(-1, Math.min(1, interleaved[i])) * 0x7FFF;
+  }
+
+  const dataSize = pcm.buffer.byteLength;
+  const wavBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(wavBuffer);
+
+  function writeStr(offset, s) {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  }
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * 2, true);
+  view.setUint16(32, numChannels * 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  const pcmView = new Int16Array(wavBuffer, 44);
+  pcmView.set(pcm);
+
+  return new Blob([wavBuffer], { type: 'audio/wav' });
+}
+
+// ============================================================
+// Chunk UI
+// ============================================================
+function addChunkItem(chunk) {
+  const list = document.getElementById('chunks-list');
+
+  const item = document.createElement('div');
+  item.className = 'chunk-item';
+  item.id = `chunk-${chunk.index}`;
+  item.style.animationDelay = `${(chunk.index - 1) * 30}ms`;
+
+  const canvas = document.createElement('canvas');
+  canvas.className = 'chunk-viz';
+  canvas.width = 300;
+  canvas.height = 36;
+  drawMiniWave(canvas, chunk.buffer);
+
+  item.innerHTML = `
+    <div class="chunk-num">${String(chunk.index).padStart(2, '0')}</div>
+    <div style="flex:1"></div>
+    <div class="chunk-info">
+      <div class="chunk-time">${formatTime(chunk.start)} → ${formatTime(chunk.end)}</div>
+      <div class="chunk-size">${formatTime(chunk.duration)} · ${formatBytes(chunk.size)}</div>
+    </div>
+    <div class="chunk-actions">
+      <button class="btn btn-ghost btn-sm" onclick="playChunk(${chunk.index - 1})">▶</button>
+      <button class="btn btn-primary btn-sm" onclick="downloadChunk(${chunk.index - 1})">↓</button>
+    </div>
+  `;
+
+  const placeholder = item.querySelector('.chunk-info').previousElementSibling;
+  item.insertBefore(canvas, placeholder);
+  placeholder.remove();
+
+  list.appendChild(item);
+}
+
+function drawMiniWave(canvas, buffer) {
+  const ctx = canvas.getContext('2d');
+  const data = buffer.getChannelData(0);
+  const w = canvas.width;
+  const h = canvas.height;
+  const step = Math.ceil(data.length / w);
+
+  ctx.fillStyle = '#0f0f0f';
+  ctx.fillRect(0, 0, w, h);
+
+  for (let i = 0; i < w; i++) {
+    let max = 0;
+    for (let j = 0; j < step; j++) {
+      const v = Math.abs(data[i * step + j] || 0);
+      if (v > max) max = v;
+    }
+    const barH = max * h;
+    ctx.fillStyle = '#e8ff4a';
+    ctx.globalAlpha = 0.6 + max * 0.4;
+    ctx.fillRect(i, (h - barH) / 2, 1, barH);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function playChunk(idx) {
+  if (currentSource) { currentSource.stop(); currentSource = null; }
+  const ctx = getAudioCtx();
+  const src = ctx.createBufferSource();
+  src.buffer = chunks[idx].buffer;
+  src.connect(ctx.destination);
+  src.start();
+  currentSource = src;
+  showToast(`▶ Playing chunk ${idx + 1}`);
+}
+
+function downloadChunk(idx) {
+  const chunk = chunks[idx];
+  const a = document.createElement('a');
+  a.href = chunk.url;
+  const base = (originalFile?.name || 'audio').replace(/\.[^.]+$/, '');
+  a.download = `${base}_chunk_${String(chunk.index).padStart(3,'0')}.wav`;
+  a.click();
+}
+
+async function downloadAll() {
+  if (chunks.length === 0) return;
+  showToast(`Downloading ${chunks.length} chunks...`);
+  for (let i = 0; i < chunks.length; i++) {
+    await new Promise(r => setTimeout(r, 150));
+    downloadChunk(i);
+  }
+}
+
+function clearChunks() {
+  chunks.forEach(c => URL.revokeObjectURL(c.url));
+  chunks = [];
+  document.getElementById('chunks-list').innerHTML = '';
+  document.getElementById('chunk-count').textContent = '0';
+  showChunksSection(false);
+}
+
+function showChunksSection(show) {
+  document.getElementById('chunks-section').style.display = show ? 'block' : 'none';
+  document.getElementById('empty-state').style.display = show ? 'none' : 'block';
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function formatTime(s) {
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(0).padStart(2, '0');
+  return `${m}:${sec}`;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1048576).toFixed(2)} MB`;
+}
+
+function setStatus(text, active) {
+  document.getElementById('status-text').textContent = text;
+  document.getElementById('status-dot').classList.toggle('active', active);
+}
+
+function updateStatus() {
+  if (!audioBuffer) return;
+  if (currentMode === 'custom') {
+    setStatus(`${customSplitPoints.length} split points → ${customSplitPoints.length + 1} chunks`, false);
+  } else {
+    const pts = computeSplitPoints();
+    setStatus(`Will create ~${pts.length - 1} chunks`, false);
+  }
+}
+
+function showToast(msg, error = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (error ? ' error' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.className = 'toast', 3000);
+}
+
+function resetAll() {
+  audioBuffer = null;
+  originalFile = null;
+  customSplitPoints = [];
+  clearChunks();
+  document.getElementById('file-info').classList.remove('visible');
+  document.getElementById('waveform-container').classList.remove('visible');
+  dropZone.style.display = '';
+  document.getElementById('process-btn').disabled = true;
+  document.getElementById('download-all-btn').style.display = 'none';
+  fileInput.value = '';
+  setStatus('Load an audio file to begin', false);
+  showChunksSection(false);
+}
+
+// Init
+renderControls();
+</script>
+</body>
+</html>
